@@ -386,12 +386,12 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
       if git grep -q -F "func $tname(" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
         found_test=1
       # JS/TS describe/it/test declarations (single & double quotes)
-      elif git grep -q -F "describe('$tname'" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "it('$tname'" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "test('$tname'" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "describe(\"$tname\"" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "it(\"$tname\"" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "test(\"$tname\"" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
+      elif git grep -q -F "describe('$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "it('$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "test('$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "describe(\"$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "it(\"$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "test(\"$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
         found_test=1
       # Python test function declaration
       elif git grep -q -F "def $tname(" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
