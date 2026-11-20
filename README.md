@@ -1,44 +1,101 @@
 # fras-map
 
-A zero-dependency, pure-Skill implementation of a **two-tier FRAS (Function / Relations / API / Semantics)** codebase map for coding agents (Claude Code, Codex, OpenCode, Cursor, etc.).
+A zero-dependency, Git-versioned **two-tier FRAS (Function / Relations / API / Semantics)** codebase map for coding agents (Claude Code, Codex, Antigravity, OpenCode, Cursor, etc.).
 
-Inspired by the FRAS entry format from [aoci-code](https://github.com/aoci-spec/aoci-code), extracted into a lightweight, non-invasive Git-versioned workflow without requiring an MCP server or external binary.
+Inspired by the FRAS entry format from [aoci-code](https://github.com/aoci-spec/aoci-code), designed as a lightweight, non-invasive specification and CI validator without requiring an MCP server or runtime dependencies.
 
 ## Why Two-Tier FRAS?
 
-- **L1 (`docs/fras/INDEX.fras`)**: Module-level map loaded at the start of a session.
-- **L2 (`docs/fras/<module>.fras`)**: File-level FRAS entries loaded on demand per task.
-- **Low token overhead & low merge conflicts**: Only core files are indexed, split by module, and synced incrementally via `git diff`.
+- **L1 (`AGENTS.md` -> ` ```fras `)**: Module-level map placed directly in `AGENTS.md`, automatically injected into the agent's context by all major harnesses without extra tool calls. Kept under 50 lines.
+- **L2 (`*.fras`)**: File-level FRAS entries loaded on-demand per task. Kept under 80 lines per file and sorted alphabetically.
+- **Flexible L2 Placement**: Default to `docs/fras/<module>.fras`, or place `.fras` directly in module directories next to existing module `README.md` files.
+- **Coexistence with Existing Docs**: When a module already has an architectural README, do not rewrite it; L2 entries only record file-level relations (`R:`) and semantic invariants (`S:`) absent from the documentation.
+- **Test Invariant Verification**: Semantic constraints in `S:` can link directly to test functions using `[T:<test_name>]`, verified automatically by the CI checker.
 
-## Repository Structure
+## When NOT to Use FRAS
 
-```text
-fras-map/
-├── README.md
-├── LICENSE
-└── skills/
-    └── fras-map/
-        └── SKILL.md
+- Small repositories (< 20,000 LOC) where the full codebase easily fits in standard agent context windows.
+- Forks, upstream mirrors, or third-party vendored repositories where maintenance overhead exceeds value.
+
+## Division of Responsibility: FRAS vs Hindsight
+
+- **FRAS**: Tracks **what holds in the code right now** (contracts, file dependencies, cross-cutting invariants, verified by tests). Branch- and commit-scoped.
+- **Hindsight**: Tracks **why decisions were made**, historical context, environment quirks, and team preferences across sessions.
+
+---
+
+## Continuous Integration (CI)
+
+`fras-map` provides a composite GitHub / Gitea Action to enforce FRAS integrity on every push and pull request.
+
+### GitHub Actions (`.github/workflows/fras.yml`)
+
+```yaml
+name: FRAS Map Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  fras-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate FRAS Map
+        uses: noir017/fras-map@v1
+        with:
+          base: ${{ github.event.before || github.event.pull_request.base.sha }}
+          stale: 'false'
 ```
 
-## Installation
+### Gitea Actions
 
-Copy `skills/fras-map/` into your agent's skills directory:
+In Gitea Actions, specify the full URL to the action repository:
 
-- **Claude Code (project)**: `.claude/skills/fras-map/SKILL.md`
-- **Claude Code (global)**: `~/.claude/skills/fras-map/SKILL.md`
-- **Codex / OpenCode / Generic**: `.agents/skills/fras-map/SKILL.md`
+```yaml
+      - name: Validate FRAS Map
+        uses: https://github.com/noir017/fras-map@v1
+        with:
+          base: ${{ github.event.before || github.event.pull_request.base.sha }}
+```
 
-Or install via the Skills CLI:
+### Checks Enforced
+
+- **Hard Errors (Exit code 1)**:
+  - Malformed L1 or L2 syntax.
+  - L1 target file missing.
+  - L2 path or glob matching zero git-tracked files.
+  - L2 `R:` path target does not exist.
+  - Line limits exceeded (L1 > 50 lines, L2 > 80 lines).
+  - Test references `[T:<test_name>]` not found via `git grep -w`.
+  - Private IP ranges (`10.x`, `172.16-31.x`, `192.168.x`) or private hostnames (`.lan`, `.local`, `.internal`).
+- **Diff Warnings**:
+  - Emits annotations when a source file is modified in the git diff but its corresponding `.fras` file was left untouched.
+- **Staleness Report (`stale: 'true'` or `--stale`)**:
+  - Reports `.fras` entries whose target files have had multiple git commits since the FRAS line was last updated.
+
+---
+
+## Local Usage
+
+Run the validator directly in the root of any git repository:
 
 ```bash
-npx skills add noir017/fras-map
+# Basic check
+sh skills/fras-map/scripts/fras-check.sh
+
+# Check with diff warnings against base branch
+sh skills/fras-map/scripts/fras-check.sh --base origin/main
+
+# Run with staleness report
+sh skills/fras-map/scripts/fras-check.sh --stale
 ```
-
-## Usage
-
-- **Bootstrap a repo**: Ask your agent to *"Use the fras-map skill to bootstrap the layered FRAS map for this repository."*
-- **Sync after changes**: Ask your agent to *"Sync the FRAS map for my current git diff."*
 
 ## License
 

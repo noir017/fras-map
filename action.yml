@@ -1,0 +1,26 @@
+name: 'FRAS Codebase Map Check'
+description: 'Validate FRAS layered codebase map syntax, invariants, and freshness'
+inputs:
+  base:
+    description: 'Base git reference for diff warnings (e.g. github.event.before or PR base sha)'
+    required: false
+    default: ''
+  stale:
+    description: 'Enable staleness report against source commit frequency (true/false)'
+    required: false
+    default: 'false'
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate FRAS Map
+      shell: sh
+      run: |
+        BASE_ARG=""
+        STALE_ARG=""
+        if [ -n "${{ inputs.base }}" ]; then
+          BASE_ARG="--base ${{ inputs.base }}"
+        fi
+        if [ "${{ inputs.stale }}" = "true" ]; then
+          STALE_ARG="--stale"
+        fi
+        sh "${{ github.action_path }}/skills/fras-map/scripts/fras-check.sh" $BASE_ARG $STALE_ARG

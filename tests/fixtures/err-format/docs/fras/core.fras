@@ -1,0 +1,2 @@
+# Invalid tier and invalid field tag
+src/core.py [UnknownTier]: F:Main logic | InvalidFieldTag:something

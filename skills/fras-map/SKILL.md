@@ -3,94 +3,92 @@ name: fras-map
 description: Maintain a lightweight, Git-versioned, two-tier FRAS (Function/Relations/API/Semantics) codebase map for coding agents. Use when bootstrapping a repository index, orienting in an unfamiliar codebase, or syncing the map after code changes via git diff.
 ---
 
-# FRAS Layered Codebase Map
+# FRAS Layered Codebase Map (v1)
 
-Maintain a high-density, plain-text architectural map of the repository using a **two-tier (L1 + L2) FRAS layout**, with zero external binaries or runtime dependencies.
+A zero-dependency, Git-versioned architectural map for coding agents using a **two-tier (L1 + L2) FRAS layout** (Function, Relations, API, Semantics).
 
-## 1. Directory Layout
+## 1. Architecture Overview
+
+- **L1 (Module-level, inside `AGENTS.md`)**: Automatically loaded by coding agent harnesses (Claude Code, Codex, Antigravity, OpenCode, etc.) at session start. Kept strictly under 50 lines.
+- **L2 (File-level `*.fras` files)**: Loaded on-demand per task. Each file is under 80 lines and sorted alphabetically by path.
+  - Placement: Default to `docs/fras/<module>.fras`. In repositories with existing module READMEs, place `.fras` alongside the README in the module directory.
+  - Coexistence: If a module already has an architectural README, do not duplicate its description; L2 only records cross-file couplings (`R:`) and invariants (`S:`) missing from the README.
+
+### Division of Responsibility: FRAS vs Hindsight
+- **FRAS**: Tracks **current verifiable constraints** that hold in the code right now. Versioned with Git alongside source code.
+- **Hindsight / Memory**: Tracks **why** decisions were made, project history, deployment runbooks, and environment facts.
+
+### When NOT to Use FRAS
+- Small codebases (< 20,000 LOC): agent context windows handle the whole tree directly.
+- Forks, upstream mirrors, or third-party vendored code.
+
+---
+
+## 2. Syntax Specifications
+
+### L1 (`AGENTS.md` under `## Codebase Map (FRAS)`)
+Place entries in a single ````fras` block (max 50 lines):
 
 ```text
-├── AGENTS.md                   # Entry pointer (5-10 lines): read L1 before coding
-└── docs/
-    └── fras/
-        ├── INDEX.fras          # L1: Module-level overview (always read first)
-        ├── <module>.fras       # L2: File-level FRAS per module (read on demand)
-        └── schema.fras         # L2 (optional): Core database tables / models
+[<module>] -> <l2_file_path> | F:<responsibility> | R:<coupled_modules> | A:<entrypoints> | S:<cross_module_invariants>
 ```
-
-- Keep `INDEX.fras` concise (ideally under 50 lines) so it loads cheaply at session start.
-- Keep each L2 `<module>.fras` under 80 lines. If a module grows past that, split it into sub-modules.
-
-## 2. FRAS Line Syntax
-
-### L1 (`docs/fras/INDEX.fras`) — Module Granularity
-
-```text
-[<module>] -> docs/fras/<module>.fras | F:<responsibility> | R:<coupled modules> | A:<public entrypoints> | S:<cross-cutting invariants>
-```
+- `R:`, `A:`, `S:` may be omitted if empty.
+- Never use ` | ` inside field contents.
 
 Example:
-
-```text
-[billing] -> docs/fras/billing.fras | F:Subscription billing, charge retries, and ledger reconciliation | R:auth,schema | A:CreateCharge,RefundWebhook | S:All write operations require idempotency keys; never call payment gateway inside DB transactions
+```fras
+[billing] -> docs/fras/billing.fras | F:Subscription charges and invoices | R:auth,db | A:CreateInvoice,WebhookHandler | S:Mutations require idempotency keys
+[auth] -> docs/fras/auth.fras | F:JWT issue and token verification | A:VerifyToken,IssueToken | S:Stateless verification; never touch database in hot path
 ```
 
-### L2 (`docs/fras/<module>.fras`) — File Granularity
+### L2 (`*.fras` files)
+Each non-comment line represents an indexed core file (max 80 lines per file):
 
 ```text
-<relative/path> [<Tier>]: F:<responsibility> | R:<must-read coupled files> | A:<exported contracts/routes/tables> | S:<non-obvious invariants>
+<repo_relative_path_or_glob> [Core|Infra|Edge]: F:<responsibility> | R:<paths,comma-separated> | A:<apis> | S:<non-obvious invariants>
+```
+- **Tiers**: `[Core]` (business logic / state machine), `[Infra]` (shared plumbing / db / storage), `[Edge]` (API handlers / CLI / webhooks).
+- **Test linking `[T:<test_func>]`**: Whenever a semantic invariant in `S:` is guarded by a test, append `[T:<test_func>]`. Multiple test tags allowed.
+- Lines starting with `#` are comments.
+- Sort entries alphabetically by file path.
+
+Example:
+```fras
+# Core billing logic
+src/billing/charge.py [Core]: F:Credit card charge workflow | R:src/billing/gateway.py | A:charge_customer | S:Must lock customer ledger before charge [T:test_charge_lock_order]
+src/billing/gateway.py [Infra]: F:Payment processor client | A:send_payment | S:Network timeout strictly capped at 5s [T:test_gateway_timeout]
+src/billing/models/*.py [Infra]: F:ORM models for invoices and subscriptions
 ```
 
-- **Tier tags**: `[Core]` (business logic / state machines), `[Infra]` (shared plumbing / storage / middleware), `[Edge]` (API / CLI / webhook handlers).
-- **F (Function)**: One crisp phrase stating what the file owns.
-- **R (Relations)**: Only list files you must read together when modifying this file (shared state, mirrored protocols, schema definitions). Do NOT dump ordinary imports.
-- **A (API)**: Public functions, interfaces, HTTP routes, or DB tables callers depend on.
-- **S (Semantics)**: Highest-value field. Record only invariants that cannot be inferred from syntax/AST alone (lock ordering, transaction boundaries, idempotency, retry assumptions, compatibility traps). Omit `| S:...` if none exist.
+---
 
 ## 3. Scope Filtering (Anti-Bloat Rules)
 
-Do NOT index every file in the repository. Classify files into three tiers:
+- **Index individually (L2)**: Core business logic, state machines, public entrypoints, shared infrastructure, critical configuration.
+- **Index by glob (single line)**: Repetitive files such as DTOs, pure schemas, or auto-generated boilerplate.
+- **Do NOT index**: Unit/integration tests, build artifacts, generated code, lockfiles, temporary files.
 
-1. **Index individually (L2)**: Core business logic, state transitions, public entrypoints, shared infrastructure, critical config, and DB schema definitions.
-2. **Summarize by glob (single line)**: Repetitive files such as pure DTOs/types, CRUD boilerplate, or i18n bundles (e.g., `src/dto/*.ts [Edge]: F:Request/response schemas for public REST API`).
-3. **Ignore completely**: Unit/integration tests, mocks/fixtures, build artifacts, generated code (protobuf/ORM/OpenAPI gen), lockfiles, and static assets.
+---
 
-## 4. Workflows
+## 4. Maintenance Workflows
 
-### Workflow A: Read Before Acting (Orientation)
+### Bootstrap
+1. Group core directories into modules.
+2. Create `.fras` files for each module (under 80 lines each, alphabetized).
+3. Insert the `## Codebase Map (FRAS)` section with the ````fras` block into `AGENTS.md`.
+4. Validate with `sh <path>/fras-check.sh`.
 
-1. Read `docs/fras/INDEX.fras` first to locate relevant modules and cross-cutting constraints (`S:`).
-2. Read only the L2 `docs/fras/<module>.fras` files relevant to the current task and any modules listed under `R:`.
-3. Inspect the actual source files before editing. Never rely on FRAS alone for exact implementation details.
+### Incremental Sync via Git Diff
+1. Inspect modified files: `git diff --name-only <base>..HEAD`.
+2. Update existing `.fras` entries if F, R, A, or S changed.
+3. If new core files were introduced, add corresponding entries.
+4. Run `fras-check.sh --base <base>` to verify zero hard errors and review un-synced file warnings.
 
-### Workflow B: Bootstrap (First-Time Index)
+---
 
-1. Inspect the repository tree (respecting `.gitignore`) and group core directories into logical modules.
-2. For each module, read the actual source files (never guess from filenames alone) and write `docs/fras/<module>.fras`.
-3. If the project has SQL migrations or ORM schemas, optionally create `docs/fras/schema.fras` for core tables and constraints.
-4. Synthesize `docs/fras/INDEX.fras` from the completed L2 files.
-5. Append the entry pointer block below to `AGENTS.md` (create it if missing):
+## 5. Automated CI Checks (`fras-check`)
 
-```markdown
-## Codebase Map (FRAS)
-
-- Before modifying code, read `docs/fras/INDEX.fras`, then load only the relevant `docs/fras/<module>.fras` files.
-- After completing structural or behavioral changes, run the `fras-map` incremental sync workflow to keep affected FRAS entries aligned.
-```
-
-### Workflow C: Incremental Sync (Post-Change Maintenance)
-
-1. Run `git diff --name-only HEAD` (or against the base branch, e.g., `git diff --name-only main...HEAD`) plus `git status --short` to list changed, added, and deleted files.
-2. Filter the list using the Scope Filtering rules in Section 3.
-3. For each affected file:
-   - **Deleted**: Remove its line from the corresponding L2 file.
-   - **Added**: Read the file and add a FRAS line to its module's L2 file.
-   - **Modified**: Read the diff/file and update the line ONLY if `F`, `R`, `A`, or `S` actually changed.
-4. Update `docs/fras/INDEX.fras` only if module boundaries, cross-module relations, public entrypoints, or top-level invariants changed.
-5. **Strict rule**: Never rewrite or reformat untouched entries.
-
-## 5. Quality Guardrails
-
-- **No hallucinated invariants**: Every `S:` claim must be backed by code, comments, or verified evidence in the repo.
-- **No prose bloat**: Keep every entry strictly single-line.
-- **Git-friendly diffs**: Sort entries alphabetically by path within each L2 file to minimize merge conflicts.
+Run via GitHub Actions (`noir017/fras-map@v1`) or locally via `skills/fras-map/scripts/fras-check.sh`:
+- **Hard Errors (exit code 1)**: Syntax violation, L1 target file missing, L2 path not matching git-tracked files, R: path missing, file line limits exceeded (L1 > 50, L2 > 80), test tag `[T:x]` not found in repo, or private network addresses (10.x, 172.16-31.x, 192.168.x, .lan, .local, .internal).
+- **Diff Warnings**: Flags source files changed in diff whose `.fras` file was left untouched.
+- **Staleness Report (`--stale`)**: Identifies `.fras` entries whose source files have been changed repeatedly since the FRAS entry's last commit.

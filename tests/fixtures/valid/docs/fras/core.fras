@@ -1,0 +1,3 @@
+# Core module map
+src/core.py [Core]: F:Main execution logic | R:src/helper.py | A:run | S:Must be initialized first [T:test_core_run]
+src/helper.py [Infra]: F:Helper functions | A:format_data
