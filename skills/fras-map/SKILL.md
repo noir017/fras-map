@@ -1,11 +1,13 @@
 ---
 name: fras-map
-description: Maintain a lightweight, Git-versioned, two-tier FRAS (Function/Relations/API/Semantics) codebase map for coding agents. Use when bootstrapping a repository index, orienting in an unfamiliar codebase, or syncing the map after code changes via git diff.
+description: Maintain a lightweight, Git-versioned, two-tier FRAS (Function/Relations/API/Semantics) codebase map for coding agents. Use when a repository's AGENTS.md has a "Codebase Map (FRAS)" block or the repo tracks *.fras files and you change code there (sync the map before committing), when bootstrapping such a map, or when its fras-check CI step fails or warns.
 ---
 
 # FRAS Layered Codebase Map (v1)
 
 A zero-dependency, Git-versioned architectural map for coding agents using a **two-tier (L1 + L2) FRAS layout** (Function, Relations, API, Semantics).
+
+Upstream: `noir017/fras-map` (this file and `scripts/fras-check.sh`). Change them there, then re-sync any copies.
 
 ## 1. Architecture Overview
 
@@ -77,13 +79,27 @@ src/billing/models/*.py [Infra]: F:ORM models for invoices and subscriptions
 
 ---
 
-## 4. Maintenance Workflows
+## 4. Quality Guardrails
+
+The checker verifies names, paths and format. It cannot tell whether an `F:` is accurate, whether an `S:` actually holds, or whether a `[T:]` test really guards that invariant. A map that passes the checker but says the wrong thing is worse than no map, because agents trust it.
+
+- Write every entry from reading the file itself (header comment/docstring **and** code). Never infer from a filename.
+- Verify each `S:` against code or a test body, not the docstring alone: docstrings drift from the implementation.
+- Attach `[T:]` only after reading the test and confirming it guards that exact invariant.
+- If the repository already documents a module (module README/AGENTS.md), the map must not contradict it.
+- Bootstrapping a large repository is a high-effort task. A quick pass produces confident, fabricated entries.
+
+---
+
+## 5. Maintenance Workflows
+
+The checker is `scripts/fras-check.sh`, bundled next to this `SKILL.md`. Run it from the repository root.
 
 ### Bootstrap
 1. Group core directories into modules.
 2. Create `.fras` files for each module (under 80 lines each, alphabetized).
 3. Insert the `## Codebase Map (FRAS)` section with the ````fras` block into `AGENTS.md`.
-4. Validate with `sh <path>/fras-check.sh`.
+4. Validate with `sh <skill-dir>/scripts/fras-check.sh`.
 
 ### Incremental Sync via Git Diff
 1. Inspect modified files: `git diff --name-only <base>..HEAD`.
@@ -93,9 +109,9 @@ src/billing/models/*.py [Infra]: F:ORM models for invoices and subscriptions
 
 ---
 
-## 5. Automated CI Checks (`fras-check`)
+## 6. Automated CI Checks (`fras-check`)
 
-Run via GitHub Actions (`noir017/fras-map@v1`) or locally via `skills/fras-map/scripts/fras-check.sh`:
+Run via GitHub Actions (`noir017/fras-map@v1`; on Gitea use `https://github.com/noir017/fras-map@v1`) or locally via the bundled `scripts/fras-check.sh`:
 - **Hard Errors (exit code 1)**: Syntax violation, L1 target file missing, L2 path not matching git-tracked files, R: path missing, A: symbol missing from matched files, file line limits exceeded (L1 > 50, L2 > 80), test tag `[T:x]` not matching a test declaration, or private network addresses (including comments; 10.x, 172.16-31.x, 192.168.x, .lan, .local, .internal; `host.docker.internal` is whitelisted).
 - **Diff Warnings**: Flags source files changed in diff whose `.fras` file was left untouched.
 - **Staleness Report (`--stale`)**: Identifies `.fras` entries whose target files/globs have been changed repeatedly since the FRAS entry's last commit.
