@@ -154,7 +154,7 @@ if (
 EOF
   cat << 'EOF' > docs/fras/core.fras
 src/core.go [Core]: F:Go core | S:Invariant [T:TestMethod]
-src/core.js [Core]: F:JS core | S:Invariant [T:test-skip] [T:test-backtick] [T:test-each]
+src/core.js [Core]: F:JS core | S:Invariant [T:test-skip] [T:test-backtick] [T:test-each] [T:tagged each]
 EOF
   echo "package src" > src/core.go
   cat << 'EOF' > src/core_test.go
@@ -167,6 +167,7 @@ EOF
 describe.skip('test-skip', () => {});
 test(`test-backtick`, () => {});
 it.each([[1]])('test-each', () => {});
+test.each`a|b`('tagged each', () => {});
 EOF
   git add -A && git commit -q -m "init"
   if output=$(sh "$CHECK_SCRIPT" 2>&1); then status=0; else status=$?; fi
@@ -183,6 +184,120 @@ else
   FAILED_COUNT=$((FAILED_COUNT + 1))
 fi
 rm -rf "$TMP_ADV"
+
+# Method call .test() rejection test
+echo "Testing method call .test() is not treated as test declaration..."
+TMP_METH="$(mktemp -d)"
+if (
+  cd "$TMP_METH"
+  git init -q
+  git config user.name "FRAS Test"
+  git config user.email "fras-test@example.com"
+  mkdir -p docs/fras src tests
+  cat << 'EOF' > AGENTS.md
+# Project
+## Codebase Map (FRAS)
+```fras
+[core] -> docs/fras/core.fras | F:Core module
+```
+EOF
+  cat << 'EOF' > docs/fras/core.fras
+src/core.js [Core]: F:Core js | S:Invariant [T:fakeTest]
+EOF
+  echo "const x = 1;" > src/core.js
+  cat << 'EOF' > tests/core.test.js
+/regex/.test('fakeTest');
+EOF
+  git add -A && git commit -q -m "init"
+  if output=$(sh "$CHECK_SCRIPT" 2>&1); then status=0; else status=$?; fi
+  if [ "$status" -eq 1 ] && echo "$output" | grep -q "does not match test declaration"; then
+    log_pass "method call .test() rejected as test declaration"
+    exit 0
+  else
+    log_fail "method call test" "expected exit code 1 with declaration error. Got: $output"
+    exit 1
+  fi
+); then
+  PASSED_COUNT=$((PASSED_COUNT + 1))
+else
+  FAILED_COUNT=$((FAILED_COUNT + 1))
+fi
+rm -rf "$TMP_METH"
+
+# Test name prefix match rejection test
+echo "Testing test name prefix match rejection..."
+TMP_PFX="$(mktemp -d)"
+if (
+  cd "$TMP_PFX"
+  git init -q
+  git config user.name "FRAS Test"
+  git config user.email "fras-test@example.com"
+  mkdir -p docs/fras src tests
+  cat << 'EOF' > AGENTS.md
+# Project
+## Codebase Map (FRAS)
+```fras
+[core] -> docs/fras/core.fras | F:Core module
+```
+EOF
+  cat << 'EOF' > docs/fras/core.fras
+src/core.js [Core]: F:Core js | S:Invariant [T:targetPrefix]
+EOF
+  echo "const x = 1;" > src/core.js
+  cat << 'EOF' > tests/core.test.js
+it('targetPrefixExtra', () => {});
+EOF
+  git add -A && git commit -q -m "init"
+  if output=$(sh "$CHECK_SCRIPT" 2>&1); then status=0; else status=$?; fi
+  if [ "$status" -eq 1 ] && echo "$output" | grep -q "does not match test declaration"; then
+    log_pass "prefix test name match rejected"
+    exit 0
+  else
+    log_fail "prefix test name match" "expected exit code 1 with declaration error. Got: $output"
+    exit 1
+  fi
+); then
+  PASSED_COUNT=$((PASSED_COUNT + 1))
+else
+  FAILED_COUNT=$((FAILED_COUNT + 1))
+fi
+rm -rf "$TMP_PFX"
+
+# host.docker.internal whitelist test
+echo "Testing host.docker.internal whitelisted in private address check..."
+TMP_DOCKER="$(mktemp -d)"
+if (
+  cd "$TMP_DOCKER"
+  git init -q
+  git config user.name "FRAS Test"
+  git config user.email "fras-test@example.com"
+  mkdir -p docs/fras src
+  cat << 'EOF' > AGENTS.md
+# Project
+## Codebase Map (FRAS)
+```fras
+[core] -> docs/fras/core.fras | F:Core module connecting to host.docker.internal
+```
+EOF
+  cat << 'EOF' > docs/fras/core.fras
+src/core.js [Core]: F:Core module | S:Connects to host.docker.internal
+EOF
+  echo "const a = 1;" > src/core.js
+  git add -A && git commit -q -m "init"
+  if output=$(sh "$CHECK_SCRIPT" 2>&1); then status=0; else status=$?; fi
+  if [ "$status" -eq 0 ]; then
+    log_pass "host.docker.internal accepted without error"
+    exit 0
+  else
+    log_fail "host.docker.internal test" "expected exit code 0. Got: $output"
+    exit 1
+  fi
+); then
+  PASSED_COUNT=$((PASSED_COUNT + 1))
+else
+  FAILED_COUNT=$((FAILED_COUNT + 1))
+fi
+rm -rf "$TMP_DOCKER"
 
 # report_error line variable isolation test (line must not become row number)
 echo "Testing report_error does not smash line variable..."

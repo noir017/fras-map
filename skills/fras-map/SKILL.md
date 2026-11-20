@@ -29,6 +29,7 @@ A zero-dependency, Git-versioned architectural map for coding agents using a **t
 ### Path & Pattern Rules
 - Paths and globs **must NOT contain whitespace**.
 - In glob patterns, `*` matches across directory boundaries (matching subdirectories recursively in Git pathspec).
+- Extensionless filenames ending in `.local` (e.g. `app/env.local`) are treated as private hostnames by the checker. To prevent false positives, use extensions (e.g. `.local.env`, `.local.json`) or avoid referencing extensionless `.local` paths directly in `.fras` lines.
 
 ### L1 (`AGENTS.md` under `## Codebase Map (FRAS)`)
 Place entries in a single ````fras` block (max 50 lines):
@@ -95,6 +96,6 @@ src/billing/models/*.py [Infra]: F:ORM models for invoices and subscriptions
 ## 5. Automated CI Checks (`fras-check`)
 
 Run via GitHub Actions (`noir017/fras-map@v1`) or locally via `skills/fras-map/scripts/fras-check.sh`:
-- **Hard Errors (exit code 1)**: Syntax violation, L1 target file missing, L2 path not matching git-tracked files, R: path missing, A: symbol missing from matched files, file line limits exceeded (L1 > 50, L2 > 80), test tag `[T:x]` not matching a test declaration, or private network addresses (including comments; 10.x, 172.16-31.x, 192.168.x, .lan, .local, .internal).
+- **Hard Errors (exit code 1)**: Syntax violation, L1 target file missing, L2 path not matching git-tracked files, R: path missing, A: symbol missing from matched files, file line limits exceeded (L1 > 50, L2 > 80), test tag `[T:x]` not matching a test declaration, or private network addresses (including comments; 10.x, 172.16-31.x, 192.168.x, .lan, .local, .internal; `host.docker.internal` is whitelisted).
 - **Diff Warnings**: Flags source files changed in diff whose `.fras` file was left untouched.
 - **Staleness Report (`--stale`)**: Identifies `.fras` entries whose target files/globs have been changed repeatedly since the FRAS entry's last commit.

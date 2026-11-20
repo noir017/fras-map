@@ -125,6 +125,7 @@ if [ -f "AGENTS.md" ]; then
       is_priv=$(awk -v raw="$line_content" '
         BEGIN {
           str = tolower(raw)
+          gsub(/host\.docker\.internal/, "", str)
           if (str ~ /(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
           if (str ~ /(^|[^0-9])172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
           if (str ~ /(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
@@ -283,6 +284,7 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
     is_priv=$(awk -v raw="$line" '
       BEGIN {
         str = tolower(raw)
+        gsub(/host\.docker\.internal/, "", str)
         if (str ~ /(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
         if (str ~ /(^|[^0-9])172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
         if (str ~ /(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
@@ -395,7 +397,7 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
       tname_esc=$(printf '%s\n' "$tname" | sed 's/[][\\*^$()+?{|.]/\\&/g')
       sq="'"
       go_re="^[[:space:]]*func[[:space:]]+(\\([^)]+\\)[[:space:]]+)?$tname_esc[[:space:]]*\\("
-      js_re="(^|[^a-zA-Z0-9_\$])(describe|it|test|suite)(\\.[a-zA-Z0-9_\$]+(\\([^)]*\\)|\\[[^]]*\\])?)*[[:space:]]*\\([[:space:]]*[${sq}\"\`]$tname_esc"
+      js_re="(^|[^a-zA-Z0-9_\$.])(describe|it|test|suite)(\\.[a-zA-Z0-9_\$]+(\\([^)]*\\)|\\[[^]]*\\]|\`[^\`]*\`)?)*[[:space:]]*\\([[:space:]]*[${sq}\"\`]$tname_esc([^a-zA-Z0-9_\$]|$)"
       py_re="^[[:space:]]*(async[[:space:]]+)?def[[:space:]]+$tname_esc([[:space:]]|\()"
 
       if git grep -q -E "$go_re" -- '*_test.go' '*.test.*' '*.spec.*' '*test_*.py' '*_test.py' ':(glob)**/test/**' ':(glob)**/tests/**' ':(glob)**/__tests__/**' 'test/**' 'tests/**' '__tests__/**' ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
