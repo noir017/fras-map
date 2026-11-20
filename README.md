@@ -10,7 +10,7 @@ Inspired by the FRAS entry format from [aoci-code](https://github.com/aoci-spec/
 - **L2 (`*.fras`)**: File-level FRAS entries loaded on-demand per task. Kept under 80 lines per file and sorted alphabetically.
 - **Flexible L2 Placement**: Default to `docs/fras/<module>.fras`, or place `.fras` directly in module directories next to existing module `README.md` files.
 - **Coexistence with Existing Docs**: When a module already has an architectural README, do not rewrite it; L2 entries only record file-level relations (`R:`) and semantic invariants (`S:`) absent from the documentation.
-- **Test Invariant Verification**: Semantic constraints in `S:` can link directly to test functions using `[T:<test_name>]`, verified automatically by the CI checker.
+- **API & Test Invariant Verification**: Public entrypoints in `A:` and test tags in `S:` (`[T:<test_name>]`) are strictly verified against actual source code and test declarations.
 
 ## When NOT to Use FRAS
 
@@ -37,7 +37,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   fras-check:
@@ -50,7 +49,7 @@ jobs:
       - name: Validate FRAS Map
         uses: noir017/fras-map@v1
         with:
-          base: ${{ github.event.before || github.event.pull_request.base.sha }}
+          base: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           stale: 'false'
 ```
 
@@ -62,7 +61,7 @@ In Gitea Actions, specify the full URL to the action repository:
       - name: Validate FRAS Map
         uses: https://github.com/noir017/fras-map@v1
         with:
-          base: ${{ github.event.before || github.event.pull_request.base.sha }}
+          base: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
 ```
 
 ### Checks Enforced
@@ -72,13 +71,14 @@ In Gitea Actions, specify the full URL to the action repository:
   - L1 target file missing.
   - L2 path or glob matching zero git-tracked files.
   - L2 `R:` path target does not exist.
+  - `A:` API symbols not found in matched files (via literal `git grep -w -F`).
   - Line limits exceeded (L1 > 50 lines, L2 > 80 lines).
-  - Test references `[T:<test_name>]` not found via `git grep -w`.
-  - Private IP ranges (`10.x`, `172.16-31.x`, `192.168.x`) or private hostnames (`.lan`, `.local`, `.internal`).
+  - Test references `[T:<test_name>]` not matching test declarations (`func Name(`, `describe/it/test('Name'`, `def name`).
+  - Private IP ranges (`10.x`, `172.16-31.x`, `192.168.x`) or private hostnames (`.lan`, `.local`, `.internal`, including comments and multi-level subdomains).
 - **Diff Warnings**:
   - Emits annotations when a source file is modified in the git diff but its corresponding `.fras` file was left untouched.
 - **Staleness Report (`stale: 'true'` or `--stale`)**:
-  - Reports `.fras` entries whose target files have had multiple git commits since the FRAS line was last updated.
+  - Reports `.fras` entries whose target files/globs have had multiple git commits since the FRAS line was last updated.
 
 ---
 

@@ -26,6 +26,10 @@ A zero-dependency, Git-versioned architectural map for coding agents using a **t
 
 ## 2. Syntax Specifications
 
+### Path & Pattern Rules
+- Paths and globs **must NOT contain whitespace**.
+- In glob patterns, `*` matches across directory boundaries (matching subdirectories recursively in Git pathspec).
+
 ### L1 (`AGENTS.md` under `## Codebase Map (FRAS)`)
 Place entries in a single ````fras` block (max 50 lines):
 
@@ -34,6 +38,7 @@ Place entries in a single ````fras` block (max 50 lines):
 ```
 - `R:`, `A:`, `S:` may be omitted if empty.
 - Never use ` | ` inside field contents.
+- Every symbol in `A:` is verified via `git grep -w -F` across all files registered in `<l2_file_path>`.
 
 Example:
 ```fras
@@ -48,7 +53,8 @@ Each non-comment line represents an indexed core file (max 80 lines per file):
 <repo_relative_path_or_glob> [Core|Infra|Edge]: F:<responsibility> | R:<paths,comma-separated> | A:<apis> | S:<non-obvious invariants>
 ```
 - **Tiers**: `[Core]` (business logic / state machine), `[Infra]` (shared plumbing / db / storage), `[Edge]` (API handlers / CLI / webhooks).
-- **Test linking `[T:<test_func>]`**: Whenever a semantic invariant in `S:` is guarded by a test, append `[T:<test_func>]`. Multiple test tags allowed.
+- **API entrypoints `A:`**: Every comma-separated symbol in `A:` must be found in the target files matched by the entry via literal `git grep -w -F`.
+- **Test linking `[T:<test_func>]`**: Put `[T:]` only in `S:` when a semantic invariant is guarded by tests. The reference must literally match a test declaration (Go `func Name(`, JS/TS `describe/it/test('Name'`, or Python `def name`).
 - Lines starting with `#` are comments.
 - Sort entries alphabetically by file path.
 
@@ -89,6 +95,6 @@ src/billing/models/*.py [Infra]: F:ORM models for invoices and subscriptions
 ## 5. Automated CI Checks (`fras-check`)
 
 Run via GitHub Actions (`noir017/fras-map@v1`) or locally via `skills/fras-map/scripts/fras-check.sh`:
-- **Hard Errors (exit code 1)**: Syntax violation, L1 target file missing, L2 path not matching git-tracked files, R: path missing, file line limits exceeded (L1 > 50, L2 > 80), test tag `[T:x]` not found in repo, or private network addresses (10.x, 172.16-31.x, 192.168.x, .lan, .local, .internal).
+- **Hard Errors (exit code 1)**: Syntax violation, L1 target file missing, L2 path not matching git-tracked files, R: path missing, A: symbol missing from matched files, file line limits exceeded (L1 > 50, L2 > 80), test tag `[T:x]` not matching a test declaration, or private network addresses (including comments; 10.x, 172.16-31.x, 192.168.x, .lan, .local, .internal).
 - **Diff Warnings**: Flags source files changed in diff whose `.fras` file was left untouched.
-- **Staleness Report (`--stale`)**: Identifies `.fras` entries whose source files have been changed repeatedly since the FRAS entry's last commit.
+- **Staleness Report (`--stale`)**: Identifies `.fras` entries whose target files/globs have been changed repeatedly since the FRAS entry's last commit.

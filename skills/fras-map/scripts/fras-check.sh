@@ -1,5 +1,5 @@
 #!/bin/sh
-# fras-check.sh - FRAS Codebase Map Validator (v1)
+# fras-check.sh - FRAS Codebase Map Validator (v1.1)
 # POSIX sh compliant validator for FRAS (Function/Relations/API/Semantics) maps.
 # Zero external dependencies (only POSIX sh, git, awk, grep).
 
@@ -110,24 +110,26 @@ if [ -f "AGENTS.md" ]; then
       [ -z "$raw_line" ] && continue
       line_num=$(echo "$raw_line" | cut -f1)
       line_content=$(echo "$raw_line" | cut -f2-)
-      # Skip empty lines or pure comment lines
-      case "$line_content" in
-        ""|\#*) continue ;;
-      esac
 
-      # Check private address
-      is_priv=$(awk -v str="$line_content" '
+      # Check private address FIRST (including comment lines)
+      is_priv=$(awk -v raw="$line_content" '
         BEGIN {
+          str = tolower(raw)
           if (str ~ /(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
           if (str ~ /(^|[^0-9])172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
           if (str ~ /(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
-          if (str ~ /(^|[^a-zA-Z0-9.-])[a-zA-Z0-9_-]+\.(lan|local|internal)([^a-zA-Z0-9.-]|$)/) { print "1"; exit }
+          if (str ~ /(^|[^a-z0-9_-])[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(lan|local|internal)([^a-z0-9_-]|$)/) { print "1"; exit }
           print "0"
         }
       ')
       if [ "$is_priv" = "1" ]; then
         report_error "AGENTS.md" "$line_num" "Private IP or internal hostname detected in L1 line: $line_content"
       fi
+
+      # Skip empty lines or pure comment lines AFTER checking private addresses
+      case "$line_content" in
+        ""|\#*) continue ;;
+      esac
 
       # Parse fields: [<mod>] -> <l2_file> | F:... [ | R:...][ | A:...][ | S:...]
       parse_res=$(awk -v line="$line_content" '
@@ -137,29 +139,28 @@ if [ -f "AGENTS.md" ]; then
             print "ERR:invalid_format"
             exit
           }
-          # parts[1] must match ^\[[a-zA-Z0-9_-]+\] -> [^ ]+$
           if (parts[1] !~ /^\[[a-zA-Z0-9_.-]+\] -> [^ ]+$/) {
             print "ERR:invalid_target_format"
             exit
           }
-          # extract l2 file path
           sub(/^\[[a-zA-Z0-9_.-]+\] -> /, "", parts[1])
           l2_path = parts[1]
 
-          # parts[2] must be F:...
           if (parts[2] !~ /^F:[^ ].*$/) {
             print "ERR:invalid_f_field"
             exit
           }
 
-          # remaining fields must be R:..., A:..., S:...
+          a_field = ""
           for (i = 3; i <= n; i++) {
-            if (parts[i] !~ /^(R|A|S):[^ ].*$/) {
+            if (parts[i] ~ /^A:[^ ].*$/) {
+              a_field = substr(parts[i], 3)
+            } else if (parts[i] !~ /^(R|S):[^ ].*$/) {
               print "ERR:invalid_subfield"
               exit
             }
           }
-          print "OK\t" l2_path
+          print "OK\t" l2_path "\t" a_field
         }
       ')
 
@@ -168,10 +169,33 @@ if [ -f "AGENTS.md" ]; then
         report_error "AGENTS.md" "$line_num" "Invalid L1 format in AGENTS.md (check module syntax, F/R/A/S tags, or forbidden ' | '): $line_content"
       else
         l2_file=$(echo "$parse_res" | cut -f2)
+        l1_apis=$(echo "$parse_res" | cut -f3)
+
         if [ ! -f "$l2_file" ]; then
           report_error "AGENTS.md" "$line_num" "L1 target L2 file does not exist: $l2_file"
         else
           echo "$l2_file" >> "$L2_LIST_TMP"
+
+          # Check L1 A: symbols in the files registered in l2_file
+          if [ -n "$l1_apis" ]; then
+            # Extract target patterns from l2_file
+            mod_patterns=$(awk '/^[ \t]*#/ || /^[ \t]*$/ {next} {n=split($0, p, " "); if(n>0) print p[1]}' "$l2_file" 2>/dev/null || true)
+            echo "$l1_apis" | tr ',' '\n' | while IFS= read -r api_sym || [ -n "$api_sym" ]; do
+              sym_clean=$(echo "$api_sym" | awk '{$1=$1};1')
+              [ -z "$sym_clean" ] && continue
+              found_sym=0
+              for m_pat in $mod_patterns; do
+                if git grep -q -w -F -- "$sym_clean" -- "$m_pat" 2>/dev/null; then
+                  found_sym=1
+                  break
+                fi
+              done
+              if [ "$found_sym" -eq 0 ]; then
+                report_error "AGENTS.md" "$line_num" "L1 API symbol '$sym_clean' not found in module files registered in '$l2_file' via 'git grep -w -F'"
+              fi
+            done
+          fi
+
         fi
       fi
     done < "$L1_TMP"
@@ -206,8 +230,14 @@ if [ -n "$BASE_REF" ]; then
   esac
 
   if [ -n "$BASE_REF" ]; then
-    git diff --name-only "$BASE_REF" HEAD 2>/dev/null > "$DIFF_FILES_TMP" || \
-    git diff --name-only "$BASE_REF" 2>/dev/null > "$DIFF_FILES_TMP" || true
+    # Verify base commit exists
+    if ! git rev-parse --verify "$BASE_REF^{commit}" >/dev/null 2>&1; then
+      report_warn "" 0 "Base ref '$BASE_REF' does not exist in repository. Skipping diff check."
+      BASE_REF=""
+    else
+      git diff --name-only "$BASE_REF" HEAD 2>/dev/null > "$DIFF_FILES_TMP" || \
+      git diff --name-only "$BASE_REF" 2>/dev/null > "$DIFF_FILES_TMP" || true
+    fi
   fi
 fi
 
@@ -238,18 +268,15 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
   line_idx=0
   while IFS= read -r line || [ -n "$line" ]; do
     line_idx=$((line_idx + 1))
-    [ -z "$line" ] && continue
-    case "$line" in
-      \#*) continue ;;
-    esac
 
-    # Check private address
-    is_priv=$(awk -v str="$line" '
+    # Check private address FIRST (including comment lines)
+    is_priv=$(awk -v raw="$line" '
       BEGIN {
+        str = tolower(raw)
         if (str ~ /(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
         if (str ~ /(^|[^0-9])172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
         if (str ~ /(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
-        if (str ~ /(^|[^a-zA-Z0-9.-])[a-zA-Z0-9_-]+\.(lan|local|internal)([^a-zA-Z0-9.-]|$)/) { print "1"; exit }
+        if (str ~ /(^|[^a-z0-9_-])[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(lan|local|internal)([^a-z0-9_-]|$)/) { print "1"; exit }
         print "0"
       }
     ')
@@ -257,10 +284,14 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
       report_error "$fras_file" "$line_idx" "Private IP or internal hostname detected: $line"
     fi
 
+    # Skip empty lines or pure comment lines AFTER checking private addresses
+    [ -z "$line" ] && continue
+    case "$line" in
+      \#*) continue ;;
+    esac
+
     # Parse L2 line syntax:
     # <path_or_glob> [Core|Infra|Edge]: F:... | R:... | A:... | S:...
-    # fields separated by " | "
-    # Note: no " | " allowed inside field content
     parse_l2=$(awk -v line="$line" '
       BEGIN {
         n = split(line, parts, " \\| ")
@@ -276,18 +307,17 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
           exit
         }
 
-        # extract path/glob, tier, and F
         first_space = index(parts[1], " ")
         target = substr(parts[1], 1, first_space - 1)
         r_part = ""
+        a_part = ""
         s_part = ""
 
-        # check subsequent fields
         for (i = 2; i <= n; i++) {
           if (parts[i] ~ /^R:[^ ].*$/) {
             r_part = substr(parts[i], 3)
           } else if (parts[i] ~ /^A:[^ ].*$/) {
-            # valid A: field
+            a_part = substr(parts[i], 3)
           } else if (parts[i] ~ /^S:[^ ].*$/) {
             s_part = substr(parts[i], 3)
           } else {
@@ -295,7 +325,7 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
             exit
           }
         }
-        print "OK\t" target "\t" r_part "\t" s_part
+        print "OK\t" target "\t" r_part "\t" a_part "\t" s_part
       }
     ')
 
@@ -307,24 +337,29 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
 
     target_pattern=$(echo "$parse_l2" | cut -f2)
     r_paths=$(echo "$parse_l2" | cut -f3)
-    s_content=$(echo "$parse_l2" | cut -f4)
+    a_symbols=$(echo "$parse_l2" | cut -f4)
+    s_content=$(echo "$parse_l2" | cut -f5)
 
     # Check target path / glob matches at least one git-tracked file
-    # Use git ls-files -- "$target_pattern"
     tracked_match=$(git ls-files -- "$target_pattern" 2>/dev/null | head -n 1 || true)
     if [ -z "$tracked_match" ]; then
       report_error "$fras_file" "$line_idx" "L2 path/glob matches no git-tracked files: '$target_pattern'"
     fi
 
-    # Check R: target paths
+    # Check A: API symbols in matched files via git grep -w -F
+    if [ -n "$a_symbols" ] && [ -n "$tracked_match" ]; then
+      echo "$a_symbols" | tr ',' '\n' | while IFS= read -r sym || [ -n "$sym" ]; do
+        sym_clean=$(echo "$sym" | awk '{$1=$1};1')
+        [ -z "$sym_clean" ] && continue
+        if ! git grep -q -w -F -- "$sym_clean" -- "$target_pattern" 2>/dev/null; then
+          report_error "$fras_file" "$line_idx" "API symbol '$sym_clean' not found in '$target_pattern' via 'git grep -w -F'"
+        fi
+      done
+    fi
+
+    # Check R: target paths (using tr instead of unquoted set --)
     if [ -n "$r_paths" ]; then
-      # Split r_paths by comma
-      old_ifs="$IFS"
-      IFS=','
-      set -- $r_paths
-      IFS="$old_ifs"
-      for r_p in "$@"; do
-        # Trim leading and trailing spaces
+      echo "$r_paths" | tr ',' '\n' | while IFS= read -r r_p || [ -n "$r_p" ]; do
         r_clean=$(echo "$r_p" | awk '{$1=$1};1')
         [ -z "$r_clean" ] && continue
         if [ ! -e "$r_clean" ]; then
@@ -334,7 +369,7 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
     fi
 
     # Check [T:<test_name>] in S: (or throughout the entry)
-    # Extract test references
+    # Must match test declarations (Go func, JS/TS describe/it/test, Python def) with literal matching
     awk -v str="$line" '
       BEGIN {
         s = str
@@ -346,19 +381,61 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
       }
     ' | while IFS= read -r tname || [ -n "$tname" ]; do
       [ -z "$tname" ] && continue
-      # Use git grep -w to find test name, excluding .fras and AGENTS.md
-      if ! git grep -q -w -- "$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
-        report_error "$fras_file" "$line_idx" "Test reference [T:${tname}] not found in repo via 'git grep -w'"
+      found_test=0
+      # Go func test declaration
+      if git grep -q -F "func $tname(" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
+        found_test=1
+      # JS/TS describe/it/test declarations (single & double quotes)
+      elif git grep -q -F "describe('$tname'" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "it('$tname'" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "test('$tname'" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "describe(\"$tname\"" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "it(\"$tname\"" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "test(\"$tname\"" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
+        found_test=1
+      # Python test function declaration
+      elif git grep -q -F "def $tname(" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
+           git grep -q -F "def $tname " -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
+        found_test=1
+      fi
+
+      if [ "$found_test" -eq 0 ]; then
+        report_error "$fras_file" "$line_idx" "Test reference [T:${tname}] does not match test declaration (func/describe/it/test/def) via literal search"
       fi
     done
 
     # Check --base diff warning:
-    # If a registered file was modified in diff, but fras_file was NOT modified in diff
     if [ -s "$DIFF_FILES_TMP" ] && [ "$fras_in_diff" -eq 0 ] && [ -n "$tracked_match" ]; then
-      # Check if any changed file matches target_pattern
       matched_changed_file=""
       while IFS= read -r changed_f || [ -n "$changed_f" ]; do
         [ -z "$changed_f" ] && continue
+        # 1. Exact match
+        if [ "$changed_f" = "$target_pattern" ]; then
+          matched_changed_file="$changed_f"
+          break
+        fi
+        # 2. Directory prefix match (e.g. skill/ matches skill/SKILL.md)
+        case "$target_pattern" in
+          */)
+            case "$changed_f" in
+              "$target_pattern"*)
+                matched_changed_file="$changed_f"
+                break
+                ;;
+            esac
+            ;;
+          *)
+            if [ -d "$target_pattern" ]; then
+              case "$changed_f" in
+                "$target_pattern"/*)
+                  matched_changed_file="$changed_f"
+                  break
+                  ;;
+              esac
+            fi
+            ;;
+        esac
+        # 3. Glob match
         case "$changed_f" in
           $target_pattern)
             matched_changed_file="$changed_f"
@@ -372,19 +449,17 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
       fi
     fi
 
-    # Check --stale mode
+    # Check --stale mode (uses full target_pattern pathspec instead of just first match)
     if [ "$STALE_MODE" -eq 1 ] && [ -n "$tracked_match" ]; then
-      # Find commit of this line in fras_file
       line_commit=$(git blame -L "${line_idx},${line_idx}" --porcelain "$fras_file" 2>/dev/null | head -n 1 | awk '{print $1}')
       case "$line_commit" in
         ""|0000000000000000000000000000000000000000*)
-          # uncommitted changes, skip
           ;;
         *)
-          # Count commits to tracked_match since line_commit
-          mod_count=$(git rev-list --count "${line_commit}..HEAD" -- "$tracked_match" 2>/dev/null || echo 0)
+          # Count commits matching target_pattern pathspec since line_commit
+          mod_count=$(git rev-list --count "${line_commit}..HEAD" -- "$target_pattern" 2>/dev/null || echo 0)
           if [ "$mod_count" -ge "$STALE_THRESHOLD" ]; then
-            echo "[STALE] ${fras_file}:${line_idx}: '${tracked_match}' modified ${mod_count} times since entry commit ${line_commit} (threshold: ${STALE_THRESHOLD})"
+            echo "[STALE] ${fras_file}:${line_idx}: '${target_pattern}' modified ${mod_count} times since entry commit ${line_commit} (threshold: ${STALE_THRESHOLD})"
             echo "        ${line}"
           fi
           ;;
