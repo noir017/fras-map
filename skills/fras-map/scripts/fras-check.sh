@@ -49,30 +49,40 @@ DIFF_FILES_TMP="$(mktemp 2>/dev/null || mktemp -t fras-diff)"
 trap 'rm -f "$ERR_FLAG_TMP" "$L1_TMP" "$L2_LIST_TMP" "$DIFF_FILES_TMP"' EXIT
 
 report_error() {
-  file="$1"
-  line="$2"
-  msg="$3"
+  _re_file="$1"
+  _re_line="$2"
+  _re_msg="$3"
   EXIT_CODE=1
   echo "1" > "$ERR_FLAG_TMP"
-  if [ -n "$line" ] && [ "$line" -gt 0 ] 2>/dev/null; then
-    echo "::error file=${file},line=${line}::${msg}" >&2
-    echo "[ERROR] ${file}:${line}: ${msg}" >&2
+  if [ -n "$_re_file" ]; then
+    if [ -n "$_re_line" ] && [ "$_re_line" -gt 0 ] 2>/dev/null; then
+      echo "::error file=${_re_file},line=${_re_line}::${_re_msg}" >&2
+      echo "[ERROR] ${_re_file}:${_re_line}: ${_re_msg}" >&2
+    else
+      echo "::error file=${_re_file}::${_re_msg}" >&2
+      echo "[ERROR] ${_re_file}: ${_re_msg}" >&2
+    fi
   else
-    echo "::error file=${file}::${msg}" >&2
-    echo "[ERROR] ${file}: ${msg}" >&2
+    echo "::error::${_re_msg}" >&2
+    echo "[ERROR] ${_re_msg}" >&2
   fi
 }
 
 report_warn() {
-  file="$1"
-  line="$2"
-  msg="$3"
-  if [ -n "$line" ] && [ "$line" -gt 0 ] 2>/dev/null; then
-    echo "::warning file=${file},line=${line}::${msg}"
-    echo "[WARN] ${file}:${line}: ${msg}"
+  _rw_file="$1"
+  _rw_line="$2"
+  _rw_msg="$3"
+  if [ -n "$_rw_file" ]; then
+    if [ -n "$_rw_line" ] && [ "$_rw_line" -gt 0 ] 2>/dev/null; then
+      echo "::warning file=${_rw_file},line=${_rw_line}::${_rw_msg}"
+      echo "[WARN] ${_rw_file}:${_rw_line}: ${_rw_msg}"
+    else
+      echo "::warning file=${_rw_file}::${_rw_msg}"
+      echo "[WARN] ${_rw_file}: ${_rw_msg}"
+    fi
   else
-    echo "::warning file=${file}::${msg}"
-    echo "[WARN] ${file}: ${msg}"
+    echo "::warning::${_rw_msg}"
+    echo "[WARN] ${_rw_msg}"
   fi
 }
 
@@ -118,7 +128,7 @@ if [ -f "AGENTS.md" ]; then
           if (str ~ /(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
           if (str ~ /(^|[^0-9])172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
           if (str ~ /(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
-          if (str ~ /(^|[^a-z0-9_-])[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(lan|local|internal)([^a-z0-9_-]|$)/) { print "1"; exit }
+          if (str ~ /(^|[^a-z0-9_.-])[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(lan|local|internal)([^a-z0-9_.-]|$|\.([^a-z0-9_-]|$))/) { print "1"; exit }
           print "0"
         }
       ')
@@ -276,7 +286,7 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
         if (str ~ /(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
         if (str ~ /(^|[^0-9])172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
         if (str ~ /(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)/) { print "1"; exit }
-        if (str ~ /(^|[^a-z0-9_-])[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(lan|local|internal)([^a-z0-9_-]|$)/) { print "1"; exit }
+        if (str ~ /(^|[^a-z0-9_.-])[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(lan|local|internal)([^a-z0-9_.-]|$|\.([^a-z0-9_-]|$))/) { print "1"; exit }
         print "0"
       }
     ')
@@ -382,20 +392,17 @@ while IFS= read -r fras_file || [ -n "$fras_file" ]; do
     ' | while IFS= read -r tname || [ -n "$tname" ]; do
       [ -z "$tname" ] && continue
       found_test=0
-      # Go func test declaration
-      if git grep -q -F "func $tname(" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
+      tname_esc=$(printf '%s\n' "$tname" | sed 's/[][\\*^$()+?{|.]/\\&/g')
+      sq="'"
+      go_re="^[[:space:]]*func[[:space:]]+(\\([^)]+\\)[[:space:]]+)?$tname_esc[[:space:]]*\\("
+      js_re="(^|[^a-zA-Z0-9_\$])(describe|it|test|suite)(\\.[a-zA-Z0-9_\$]+(\\([^)]*\\)|\\[[^]]*\\])?)*[[:space:]]*\\([[:space:]]*[${sq}\"\`]$tname_esc"
+      py_re="^[[:space:]]*(async[[:space:]]+)?def[[:space:]]+$tname_esc([[:space:]]|\()"
+
+      if git grep -q -E "$go_re" -- '*_test.go' '*.test.*' '*.spec.*' '*test_*.py' '*_test.py' ':(glob)**/test/**' ':(glob)**/tests/**' ':(glob)**/__tests__/**' 'test/**' 'tests/**' '__tests__/**' ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
         found_test=1
-      # JS/TS describe/it/test declarations (single & double quotes)
-      elif git grep -q -F "describe('$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "it('$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "test('$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "describe(\"$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "it(\"$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "test(\"$tname" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
+      elif git grep -q -E "$js_re" -- '*_test.go' '*.test.*' '*.spec.*' '*test_*.py' '*_test.py' ':(glob)**/test/**' ':(glob)**/tests/**' ':(glob)**/__tests__/**' 'test/**' 'tests/**' '__tests__/**' ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
         found_test=1
-      # Python test function declaration
-      elif git grep -q -F "def $tname(" -- ':!*.fras' ':!AGENTS.md' 2>/dev/null || \
-           git grep -q -F "def $tname " -- ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
+      elif git grep -q -E "$py_re" -- '*_test.go' '*.test.*' '*.spec.*' '*test_*.py' '*_test.py' ':(glob)**/test/**' ':(glob)**/tests/**' ':(glob)**/__tests__/**' 'test/**' 'tests/**' '__tests__/**' ':!*.fras' ':!AGENTS.md' 2>/dev/null; then
         found_test=1
       fi
 

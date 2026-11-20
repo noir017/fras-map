@@ -38,7 +38,7 @@ Place entries in a single ````fras` block (max 50 lines):
 ```
 - `R:`, `A:`, `S:` may be omitted if empty.
 - Never use ` | ` inside field contents.
-- Every symbol in `A:` is verified via `git grep -w -F` across all files registered in `<l2_file_path>`.
+- Every symbol in `A:` is verified via `git grep -w -F` across all files registered in `<l2_file_path>` (verifying literal occurrence, not code declaration, so routes, table names, and CLI commands remain valid).
 
 Example:
 ```fras
@@ -53,8 +53,8 @@ Each non-comment line represents an indexed core file (max 80 lines per file):
 <repo_relative_path_or_glob> [Core|Infra|Edge]: F:<responsibility> | R:<paths,comma-separated> | A:<apis> | S:<non-obvious invariants>
 ```
 - **Tiers**: `[Core]` (business logic / state machine), `[Infra]` (shared plumbing / db / storage), `[Edge]` (API handlers / CLI / webhooks).
-- **API entrypoints `A:`**: Every comma-separated symbol in `A:` must be found in the target files matched by the entry via literal `git grep -w -F`.
-- **Test linking `[T:<test_func>]`**: Put `[T:]` only in `S:` when a semantic invariant is guarded by tests. The reference must literally match a test declaration (Go `func Name(`, JS/TS `describe/it/test('Name'`, or Python `def name`).
+- **API entrypoints `A:`**: Every comma-separated symbol in `A:` must appear in the target files matched by the entry via literal `git grep -w -F`. Checks literal occurrence rather than formal declaration to accommodate routes, table names, and commands without false positives.
+- **Test linking `[T:<test_func>]`**: Put `[T:]` only in `S:` when a semantic invariant is guarded by tests. The reference must match a test declaration located in test files (`*_test.go`, `*.test.*`, `*.spec.*`, `test_*.py`, `*_test.py`, `test/`, `tests/`, `__tests__/`), supporting Go standalone functions and receiver methods, JS/TS `describe/it/test` (with quotes, backticks, `.skip`, `.only`, `.each`), and Python functions/methods.
 - Lines starting with `#` are comments.
 - Sort entries alphabetically by file path.
 
